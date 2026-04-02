@@ -328,21 +328,35 @@ function goSec(sec) {
 }
 
 // ── FIREBASE STATUS BANNER ────────────────────────────────────
-window.addEventListener('DOMContentLoaded', function() {
+(function() {
   var badge = document.getElementById('fb-badge');
   var stxt  = document.getElementById('fb-status-txt');
-  if (FB_READY && db) {
+  if (FB_READY && db && auth) {
     badge.className = 'fb-badge fb-live';
     badge.textContent = '🔥 Firebase LIVE — ' + firebaseConfig.projectId;
-    stxt.innerHTML = '<span style="color:#20875a;font-weight:600">✓ Connected: ' + firebaseConfig.projectId + '</span><br>Authentication required to write. Public pages read-only.';
+    stxt.innerHTML = '<span style="color:#20875a;font-weight:600">✓ Firestore + Auth connected</span><br>Project: ' + firebaseConfig.projectId + '<br>Writes require signed-in admin. Public pages read-only.';
+  } else if (FB_READY && db && !auth) {
+    badge.className = 'fb-badge fb-local';
+    badge.textContent = '⚠ Auth SDK not loaded';
+    stxt.innerHTML = '<span style="color:#ff8080">firebase-auth.js missing.</span> Check the script tags at the top of admin.html.';
   } else {
     badge.className = 'fb-badge fb-local';
-    badge.textContent = '💾 localStorage mode — Firebase not configured';
-    stxt.innerHTML = '<span style="color:#c8922a">⚠ Firebase not configured.</span> Edit <strong>firebase-config.js</strong>.';
+    badge.textContent = '💾 localStorage mode';
+    stxt.innerHTML = '<span style="color:#c8922a">Firebase not configured.</span> Paste your config into firebase-config.js.';
+  }
+})();
+
+// ── CHECK EXISTING SESSION on page load ───────────────────────
+// Uses vfOnAuthReady from db.js — safe for all cases
+vfOnAuthReady(function(user) {
+  if (user) {
+    document.getElementById('login').classList.add('hide');
+    document.getElementById('user-pill').textContent = user.email;
+    loadAll();
   }
 });
 
-// ── LOGIN (uses Firebase Auth) ────────────────────────────────
+// ── LOGIN ─────────────────────────────────────────────────────
 document.getElementById('lbtn').onclick = doLogin;
 document.getElementById('lp').addEventListener('keydown', function(e) {
   if (e.key === 'Enter') doLogin();
@@ -351,25 +365,24 @@ document.getElementById('lp').addEventListener('keydown', function(e) {
 function doLogin() {
   var email = document.getElementById('le').value.trim();
   var pass  = document.getElementById('lp').value;
-  var err   = document.getElementById('lerr');
+  var errEl = document.getElementById('lerr');
   var btn   = document.getElementById('lbtn');
-  err.style.display = 'none';
+  errEl.style.display = 'none';
 
-  if (!email || !pass) { err.textContent = 'Enter email and password.'; err.style.display = 'block'; return; }
-
-  // Firebase not configured — allow localStorage-only mode with config file credentials
-  if (!auth) {
-    if (typeof ADMIN_EMAIL !== 'undefined' && email === ADMIN_EMAIL && pass === ADMIN_PASS) {
-      document.getElementById('login').classList.add('hide');
-      loadAll();
-    } else {
-      err.textContent = 'Incorrect credentials.';
-      err.style.display = 'block';
-    }
+  if (!email || !pass) {
+    errEl.textContent = 'Enter email and password.';
+    errEl.style.display = 'block';
     return;
   }
 
-  // Real Firebase Auth sign-in
+  // localStorage mode (Firebase not configured) — just open the panel
+  if (!auth) {
+    document.getElementById('login').classList.add('hide');
+    loadAll();
+    return;
+  }
+
+  // Firebase Auth sign-in
   btn.disabled = true;
   btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
 
@@ -382,23 +395,17 @@ function doLogin() {
     .catch(function(e) {
       btn.disabled = false;
       btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Login';
-      var msg = 'Login failed.';
-      if (e.code === 'auth/wrong-password' || e.code === 'auth/user-not-found') msg = 'Incorrect email or password.';
-      if (e.code === 'auth/too-many-requests') msg = 'Too many attempts. Try again later.';
-      if (e.code === 'auth/invalid-email') msg = 'Invalid email address.';
-      err.textContent = msg;
-      err.style.display = 'block';
+      var msg = 'Login failed. Try again.';
+      if (e.code === 'auth/wrong-password')        msg = 'Wrong password.';
+      if (e.code === 'auth/user-not-found')         msg = 'No account with this email.';
+      if (e.code === 'auth/invalid-email')          msg = 'Invalid email address.';
+      if (e.code === 'auth/invalid-credential')     msg = 'Wrong email or password.';
+      if (e.code === 'auth/too-many-requests')      msg = 'Too many attempts. Wait a moment.';
+      if (e.code === 'auth/network-request-failed') msg = 'No internet connection.';
+      errEl.textContent = msg;
+      errEl.style.display = 'block';
     });
 }
-
-// Persist session — if already signed in, skip login screen
-_authReady.then(function(user) {
-  if (user) {
-    document.getElementById('login').classList.add('hide');
-    document.getElementById('user-pill').textContent = user.email;
-    loadAll();
-  }
-});
 
 // ── LOGOUT ───────────────────────────────────────────────────
 document.getElementById('lobtn').onclick = function() {
